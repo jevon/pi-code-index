@@ -17,22 +17,13 @@ The model uses `code_map` to orient, `code_search` to find definitions, and `cod
 ## Install
 
 ```bash
-cd /path/to/pi-code-index
-npm install
+pi install git:github.com/jevon/pi-code-index
 ```
 
-Then add to your pi settings (`~/.pi/agent/settings.json`):
-
-```json
-{
-  "extensions": ["/path/to/pi-code-index/src/index.ts"]
-}
-```
-
-Or test directly:
+Or try it without installing:
 
 ```bash
-pi -e /path/to/pi-code-index/src/index.ts
+pi -e git:github.com/jevon/pi-code-index
 ```
 
 ## Supported Languages
