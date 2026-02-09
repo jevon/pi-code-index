@@ -4,6 +4,7 @@ import { javascriptExtractor } from "./javascript.ts";
 import { pythonExtractor } from "./python.ts";
 import { goExtractor } from "./go.ts";
 import { rustExtractor } from "./rust.ts";
+import { rubyExtractor } from "./ruby.ts";
 
 // Language name → extractor
 const extractors: Record<string, SymbolExtractor> = {
@@ -13,6 +14,7 @@ const extractors: Record<string, SymbolExtractor> = {
   python: pythonExtractor,
   go: goExtractor,
   rust: rustExtractor,
+  ruby: rubyExtractor,
 };
 
 export function getExtractor(language: string): SymbolExtractor | undefined {

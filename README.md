@@ -28,7 +28,7 @@ pi -e git:github.com/jevon/pi-code-index
 
 ## Supported Languages
 
-TypeScript, TSX, JavaScript, JSX, Python, Go, Rust. More can be added easily — just create an extractor in `src/extractors/`.
+TypeScript, TSX, JavaScript, JSX, Python, Go, Rust, Ruby. More can be added easily — just create an extractor in `src/extractors/`.
 
 Available WASM grammars (via `tree-sitter-wasms`): bash, C, C#, C++, CSS, Dart, Elixir, Elm, Go, HTML, Java, JavaScript, JSON, Kotlin, Lua, Objective-C, OCaml, PHP, Python, Ruby, Rust, Scala, Swift, TOML, TSX, TypeScript, Vue, YAML, Zig.
 
