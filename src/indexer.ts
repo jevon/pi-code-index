@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { extname, join, relative } from "node:path";
 import Parser from "web-tree-sitter";
 import { getLanguageConfig, getWasmPath } from "./languages.ts";
@@ -27,31 +28,116 @@ async function ensureParserInit(): Promise<void> {
   parserInitialized = true;
 }
 
+// --- Cache ---
+
+interface CacheData {
+  version: 1;
+  hash: string;
+  symbols: Symbol[];
+  languages: [string, number][];
+}
+
+const CACHE_VERSION = 1;
+
+function getCachePath(cwd: string): string {
+  return join(cwd, ".pi", "code-index-cache.json");
+}
+
+function computeRepoHash(cwd: string): string {
+  const hash = createHash("sha256");
+
+  // HEAD commit covers all committed changes
+  try {
+    const head = execSync("git rev-parse HEAD", { cwd, encoding: "utf-8" }).trim();
+    hash.update(head);
+  } catch {
+    hash.update("no-head");
+  }
+
+  // Porcelain status covers uncommitted/staged/untracked changes
+  try {
+    const status = execSync("git status --porcelain", { cwd, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 });
+    hash.update(status);
+  } catch {
+    hash.update("no-status");
+  }
+
+  return hash.digest("hex");
+}
+
+function loadCache(cwd: string, hash: string): CacheData | null {
+  const cachePath = getCachePath(cwd);
+  try {
+    if (!existsSync(cachePath)) return null;
+    const raw = readFileSync(cachePath, "utf-8");
+    const data: CacheData = JSON.parse(raw);
+    if (data.version !== CACHE_VERSION || data.hash !== hash) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+function saveCache(cwd: string, hash: string, symbols: Symbol[], languages: Map<string, number>): void {
+  const cachePath = getCachePath(cwd);
+  const data: CacheData = {
+    version: CACHE_VERSION,
+    hash,
+    symbols,
+    languages: [...languages.entries()],
+  };
+  try {
+    const dir = join(cwd, ".pi");
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(cachePath, JSON.stringify(data));
+  } catch {
+    // Non-fatal: caching is best-effort
+  }
+}
+
+// --- Build ---
+
 export interface BuildIndexOptions {
   onProgress?: (processed: number, total: number) => void;
+  noCache?: boolean;
 }
 
 export async function buildIndex(
   cwd: string,
   options?: BuildIndexOptions,
 ): Promise<CodeIndex> {
-  await ensureParserInit();
+  // 1. Check cache first (fast — only needs git rev-parse + git status)
+  let hash: string;
+  try {
+    hash = computeRepoHash(cwd);
+  } catch {
+    throw new Error("Not a git repository. code_index requires a git repo for file discovery.");
+  }
 
-  // 1. Discover files via git
+  if (!options?.noCache) {
+    const cached = loadCache(cwd, hash);
+    if (cached) {
+      const languageFileCounts = new Map<string, number>(cached.languages);
+      return createCodeIndex(cached.symbols, languageFileCounts);
+    }
+  }
+
+  // 2. Discover files via git (only on cache miss)
   let files: string[];
   try {
     const output = execSync("git ls-files --cached --others --exclude-standard", {
       cwd,
-      maxBuffer: 50 * 1024 * 1024, // 50MB buffer for large repos
+      maxBuffer: 50 * 1024 * 1024,
       encoding: "utf-8",
     });
     files = output.split("\n").filter(Boolean);
   } catch {
-    // Fallback: not a git repo, this tool needs git
     throw new Error("Not a git repository. code_index requires a git repo for file discovery.");
   }
 
-  // 2. Group by language
+  // 3. Full index build
+  await ensureParserInit();
+
   const byLanguage = new Map<string, string[]>();
   const languageFileCounts = new Map<string, number>();
 
@@ -70,7 +156,6 @@ export async function buildIndex(
     );
   }
 
-  // 3. Load grammars and parse
   const allSymbols: Symbol[] = [];
   let totalFiles = 0;
   for (const files of byLanguage.values()) totalFiles += files.length;
@@ -80,19 +165,16 @@ export async function buildIndex(
     const extractor = getExtractor(language);
     if (!extractor) continue;
 
-    // Find wasm file for this language
     const firstFile = langFiles[0];
     const ext = extname(firstFile);
     const config = getLanguageConfig(ext);
     if (!config) continue;
 
-    // Load language grammar
     const wasmPath = getWasmPath(config.wasmFile);
     let lang: Parser.Language;
     try {
       lang = await Parser.Language.load(wasmPath);
     } catch (e) {
-      // Skip languages where grammar fails to load
       processed += langFiles.length;
       continue;
     }
@@ -100,7 +182,6 @@ export async function buildIndex(
     const parser = new Parser();
     parser.setLanguage(lang);
 
-    // Parse files in batches
     const BATCH_SIZE = 100;
     for (let i = 0; i < langFiles.length; i += BATCH_SIZE) {
       const batch = langFiles.slice(i, i + BATCH_SIZE);
@@ -108,7 +189,6 @@ export async function buildIndex(
       for (const file of batch) {
         try {
           const source = readFileSync(join(cwd, file), "utf-8");
-          // Skip very large files (>500KB) - likely generated
           if (source.length > 500_000) {
             processed++;
             continue;
@@ -123,15 +203,15 @@ export async function buildIndex(
         processed++;
       }
 
-      // Report progress
       options?.onProgress?.(processed, totalFiles);
-
-      // Yield to event loop between batches
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
 
     parser.delete();
   }
+
+  // 4. Save cache
+  saveCache(cwd, hash, allSymbols, languageFileCounts);
 
   return createCodeIndex(allSymbols, languageFileCounts);
 }
