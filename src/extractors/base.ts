@@ -22,7 +22,8 @@ export function extractSignature(node: Parser.SyntaxNode): string | undefined {
   const returnType = node.childForFieldName("return_type");
   let sig = params.text;
   if (returnType) sig += ": " + returnType.text;
-  // Truncate long signatures
+  // Collapse to single line and truncate
+  sig = sig.replace(/\s*\n\s*/g, " ");
   if (sig.length > 120) sig = sig.slice(0, 117) + "...";
   return sig;
 }
