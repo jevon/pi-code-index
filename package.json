@@ -2,6 +2,7 @@
   "name": "pi-code-index",
   "version": "0.1.0",
   "description": "Tree-sitter powered code-aware search for pi",
+  "keywords": ["pi-package"],
   "type": "module",
   "pi": {
     "extensions": ["./src/index.ts"]
